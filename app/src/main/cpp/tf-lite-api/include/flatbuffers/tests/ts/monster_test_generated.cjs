@@ -27,7 +27,8 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var monster_test_exports = {};
 __export(monster_test_exports, {
   MyGame: () => my_game_exports,
-  TableA: () => TableA
+  TableA: () => TableA,
+  TableAT: () => TableAT
 });
 module.exports = __toCommonJS(monster_test_exports);
 
@@ -167,6 +168,7 @@ __export(my_game_exports, {
   Example: () => example_exports,
   Example2: () => example2_exports,
   InParentNamespace: () => InParentNamespace,
+  InParentNamespaceT: () => InParentNamespaceT,
   OtherNameSpace: () => other_name_space_exports
 });
 
@@ -227,21 +229,31 @@ var InParentNamespaceT = class {
 var example_exports = {};
 __export(example_exports, {
   Ability: () => Ability,
+  AbilityT: () => AbilityT,
   Any: () => Any,
   AnyAmbiguousAliases: () => AnyAmbiguousAliases,
   AnyUniqueAliases: () => AnyUniqueAliases,
   Color: () => Color,
   LongEnum: () => LongEnum,
   Monster: () => Monster2,
+  MonsterT: () => MonsterT2,
   Race: () => Race,
   Referrable: () => Referrable,
+  ReferrableT: () => ReferrableT,
   Stat: () => Stat,
+  StatT: () => StatT,
   StructOfStructs: () => StructOfStructs,
   StructOfStructsOfStructs: () => StructOfStructsOfStructs,
+  StructOfStructsOfStructsT: () => StructOfStructsOfStructsT,
+  StructOfStructsT: () => StructOfStructsT,
   Test: () => Test,
   TestSimpleTableWithEnum: () => TestSimpleTableWithEnum,
+  TestSimpleTableWithEnumT: () => TestSimpleTableWithEnumT,
+  TestT: () => TestT,
   TypeAliases: () => TypeAliases,
-  Vec3: () => Vec3
+  TypeAliasesT: () => TypeAliasesT,
+  Vec3: () => Vec3,
+  Vec3T: () => Vec3T
 });
 
 // my-game/example/ability.js
@@ -802,7 +814,7 @@ var Vec3 = class {
   }
 };
 var Vec3T = class {
-  constructor(x = 0, y = 0, z = 0, test1 = 0, test2 = 0, test3 = null) {
+  constructor(x = 0, y = 0, z = 0, test1 = 0, test2 = Color.Red, test3 = null) {
     this.x = x;
     this.y = y;
     this.z = z;
@@ -2502,7 +2514,8 @@ var TypeAliasesT = class {
 // my-game/example2.js
 var example2_exports = {};
 __export(example2_exports, {
-  Monster: () => Monster
+  Monster: () => Monster,
+  MonsterT: () => MonsterT
 });
 
 // my-game/other-name-space.js
@@ -2510,7 +2523,9 @@ var other_name_space_exports = {};
 __export(other_name_space_exports, {
   FromInclude: () => FromInclude,
   TableB: () => TableB,
-  Unused: () => Unused
+  TableBT: () => TableBT,
+  Unused: () => Unused,
+  UnusedT: () => UnusedT
 });
 
 // my-game/other-name-space/from-include.js

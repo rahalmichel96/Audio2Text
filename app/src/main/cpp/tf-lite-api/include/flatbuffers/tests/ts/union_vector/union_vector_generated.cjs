@@ -27,13 +27,19 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var union_vector_exports = {};
 __export(union_vector_exports, {
   Attacker: () => Attacker,
+  AttackerT: () => AttackerT,
   BookReader: () => BookReader,
+  BookReaderT: () => BookReaderT,
   Character: () => Character,
   FallingTub: () => FallingTub,
+  FallingTubT: () => FallingTubT,
   Gadget: () => Gadget,
   HandFan: () => HandFan,
+  HandFanT: () => HandFanT,
   Movie: () => Movie,
-  Rapunzel: () => Rapunzel
+  MovieT: () => MovieT,
+  Rapunzel: () => Rapunzel,
+  RapunzelT: () => RapunzelT
 });
 module.exports = __toCommonJS(union_vector_exports);
 

@@ -1,7 +1,19 @@
+load("@aspect_bazel_lib//lib:copy_to_bin.bzl", "copy_to_bin")
 load("@rules_cc//cc:defs.bzl", "cc_test")
-load("//:build_defs.bzl", "flatbuffer_cc_library")
+load("//:build_defs.bzl", "DEFAULT_FLATC_ARGS", "flatbuffer_cc_library")
 
 package(default_visibility = ["//visibility:private"])
+
+# rules_js works around various JS tooling limitations by copying everything
+# into the output directory. Make the test data available to the tests this way.
+copy_to_bin(
+    name = "test_data_copied_to_bin",
+    srcs = glob([
+        "*.mon",
+        "*.json",
+    ]),
+    visibility = ["//tests/ts:__subpackages__"],
+)
 
 # Test binary.
 cc_test(
@@ -82,13 +94,22 @@ cc_test(
         ":optional_scalars.json",
         ":optional_scalars_defaults.json",
         ":prototest/imported.proto",
-        ":prototest/test.golden",
+        ":prototest/non-positive-id.proto",
+        ":prototest/test.golden.fbs",
         ":prototest/test.proto",
-        ":prototest/test_include.golden",
-        ":prototest/test_suffix.golden",
-        ":prototest/test_union.golden",
-        ":prototest/test_union_include.golden",
-        ":prototest/test_union_suffix.golden",
+        ":prototest/test_id.golden.fbs",
+        ":prototest/test_include.golden.fbs",
+        ":prototest/test_include_id.golden.fbs",
+        ":prototest/test_suffix.golden.fbs",
+        ":prototest/test_suffix_id.golden.fbs",
+        ":prototest/test_union.golden.fbs",
+        ":prototest/test_union_id.golden.fbs",
+        ":prototest/test_union_include.golden.fbs",
+        ":prototest/test_union_include_id.golden.fbs",
+        ":prototest/test_union_suffix.golden.fbs",
+        ":prototest/test_union_suffix_id.golden.fbs",
+        ":prototest/twice-id.proto",
+        ":prototest/use-reserved-id.proto",
         ":unicode_test.json",
         ":union_vector/union_vector.fbs",
         ":union_vector/union_vector.json",
@@ -104,6 +125,7 @@ cc_test(
         ":monster_test_cc_fbs",
         ":native_type_test_cc_fbs",
         "//:flatbuffers",
+        "//src:generate_fbs",
     ],
 )
 
@@ -138,6 +160,7 @@ cc_library(
     ],
     hdrs = [
         "monster_test.grpc.fb.h",
+        "monster_test_bfbs_generated.h",
         "monster_test_generated.h",
     ],
     includes = ["."],
@@ -160,6 +183,13 @@ flatbuffer_cc_library(
 flatbuffer_cc_library(
     name = "monster_test_cc_fbs",
     srcs = ["monster_test.fbs"],
+    outs = ["monster_test_bfbs_generated.h"],
+    flatc_args = DEFAULT_FLATC_ARGS + [
+        "--bfbs-comments",
+        "--bfbs-builtins",
+        "--bfbs-gen-embed",
+        "--bfbs-filenames tests",
+    ],
     include_paths = ["tests/include_test"],
     visibility = ["//grpc/tests:__subpackages__"],
     deps = [":include_test_fbs"],

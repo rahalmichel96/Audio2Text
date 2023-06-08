@@ -27,10 +27,15 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var example_exports = {};
 __export(example_exports, {
   ArrayStruct: () => ArrayStruct,
+  ArrayStructT: () => ArrayStructT,
   ArrayTable: () => ArrayTable,
+  ArrayTableT: () => ArrayTableT,
   InnerStruct: () => InnerStruct,
+  InnerStructT: () => InnerStructT,
   NestedStruct: () => NestedStruct,
+  NestedStructT: () => NestedStructT,
   OuterStruct: () => OuterStruct,
+  OuterStructT: () => OuterStructT,
   TestEnum: () => TestEnum
 });
 module.exports = __toCommonJS(example_exports);

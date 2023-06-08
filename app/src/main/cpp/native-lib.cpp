@@ -26,8 +26,9 @@ extern "C" {
 #include "whisper.h"
 #include "input_features.h"
 #include "tensorflow/lite/delegates/gpu/delegate.h"
-#include "tensorflow/lite/delegates/flex/delegate.h"
 #include <fstream>
+#include <memory>
+
 #define INFERENCE_ON_AUDIO_FILE 1
 
 #define TFLITE_MINIMAL_CHECK(x)                              \
@@ -407,26 +408,26 @@ Java_com_example_audio2text_MainActivity_loadModelJNI(
     struct timeval start_time,end_time;
     if(!g_whisper_tflite_params.is_whisper_tflite_initialized) {
         gettimeofday(&start_time, NULL);
-        const char *modelpathEncoder = "whisper-encoder-hybrid.tflite";
-        const char *modelpathDecoder = "whisper-decoder-language-hybrid.tflite";
-        //const char *modelpath = "whisper-small.tflite";
+        //const char *modelpathEncoder = "whisper-encoder-hybrid.tflite";
+        //const char *modelpathDecoder = "whisper-decoder-language-hybrid.tflite";
+        const char *modelpath = "whisper-small.tflite";
         if (!(env->IsSameObject(assetManager, NULL))) {
             AAssetManager *mgr = AAssetManager_fromJava(env, assetManager);
-            AAsset *assetEncoder = AAssetManager_open(mgr, modelpathEncoder, AASSET_MODE_UNKNOWN);
-            assert(assetEncoder != nullptr);
+            AAsset *asset = AAssetManager_open(mgr, modelpath, AASSET_MODE_UNKNOWN);
+            assert(asset != nullptr);
 
-            g_whisper_tflite_params.size = AAsset_getLength(assetEncoder);
+            g_whisper_tflite_params.size = AAsset_getLength(asset);
             g_whisper_tflite_params.buffer = (char *) malloc(sizeof(char) * g_whisper_tflite_params.size);
-            AAsset_read(assetEncoder, g_whisper_tflite_params.buffer, g_whisper_tflite_params.size);
-            AAsset_close(assetEncoder);
+            AAsset_read(asset, g_whisper_tflite_params.buffer, g_whisper_tflite_params.size);
+            AAsset_close(asset);
 
-            AAsset *assetDecoder = AAssetManager_open(mgr, modelpathDecoder, AASSET_MODE_UNKNOWN);
+            /*AAsset *assetDecoder = AAssetManager_open(mgr, modelpathDecoder, AASSET_MODE_UNKNOWN);
             assert(assetDecoder != nullptr);
 
             g_whisper_tflite_decoder_params.size = AAsset_getLength(assetDecoder);
             g_whisper_tflite_decoder_params.buffer = (char *) malloc(sizeof(char) * g_whisper_tflite_decoder_params.size);
             AAsset_read(assetDecoder, g_whisper_tflite_decoder_params.buffer, g_whisper_tflite_decoder_params.size);
-            AAsset_close(assetDecoder);
+            AAsset_close(assetDecoder);*/
         }
 
         //Load filters and vocab data from preg enerated filters_vocab_gen.bin file
@@ -527,7 +528,7 @@ Java_com_example_audio2text_MainActivity_loadModelJNI(
         __android_log_print(ANDROID_LOG_VERBOSE, "Filename", "Le fichier est : %s", pcmfilename);
         {
             drwav wav;
-            drmp3 mp3;
+            //drmp3 mp3;
 
             // Open the file in binary mode
             std::ifstream file(pcmfilename, std::ios::binary);
@@ -603,25 +604,16 @@ Java_com_example_audio2text_MainActivity_loadModelJNI(
         TFLITE_MINIMAL_CHECK(g_whisper_tflite_params.model != nullptr);
 
         // Build the interpreter with the InterpreterBuilder.
-        // Note: all Interpreters should be built with the InterpreterBuilder,
-        // which allocates memory for the Interpreter and does various set up
-        // tasks so that the Interpreter can read the provided model.
-        // Create the Flex delegate.
-        TfLiteDelegate *flex_delegate = tflite::FlexDelegate::Create();
-
         tflite::InterpreterBuilder builder(*(g_whisper_tflite_params.model), g_whisper_tflite_params.resolver);
-
-        // Add the Flex delegate.
-        builder.AddDelegate(flex_delegate);
 
         builder(&(g_whisper_tflite_params.interpreter));
         TFLITE_MINIMAL_CHECK(g_whisper_tflite_params.interpreter != nullptr);
 
         // NEW: Prepare GPU delegate.
         //  auto* delegate = TfLiteGpuDelegateV2Create(nullptr);
-        if (builder(g_whisper_tflite_params.interpreter) != kTfLiteOk) {
-             __android_log_print(ANDROID_LOG_VERBOSE, "Whisper ASR", "flex delegate failed \n");
-         }
+        // if (interpreter->ModifyGraphWithDelegate(delegate) != kTfLiteOk) {
+        //     __android_log_print(ANDROID_LOG_VERBOSE, "Whisper ASR", "gpu delegate failed \n");
+        // }
 
         // Allocate tensor buffers.
         TFLITE_MINIMAL_CHECK(g_whisper_tflite_params.interpreter->AllocateTensors() == kTfLiteOk);
@@ -629,7 +621,7 @@ Java_com_example_audio2text_MainActivity_loadModelJNI(
         g_whisper_tflite_params.input = g_whisper_tflite_params.interpreter->typed_input_tensor<float>(0);
         g_whisper_tflite_params.is_whisper_tflite_initialized = true;
     }
-    if(!g_whisper_tflite_decoder_params.is_whisper_tflite_initialized) {
+    /*if(!g_whisper_tflite_decoder_params.is_whisper_tflite_initialized) {
         g_whisper_tflite_decoder_params.model =
                 tflite::FlatBufferModel::BuildFromBuffer(g_whisper_tflite_decoder_params.buffer, g_whisper_tflite_decoder_params.size);
         TFLITE_MINIMAL_CHECK(g_whisper_tflite_decoder_params.model != nullptr);
@@ -644,12 +636,21 @@ Java_com_example_audio2text_MainActivity_loadModelJNI(
         g_whisper_tflite_decoder_params.is_whisper_tflite_initialized = true;
     } else {
         //memcpy(g_whisper_tflite_decoder_params.input, g_whisper_tflite_decoder_params.inputOriginal, sizeof(g_whisper_tflite_decoder_params.inputOriginal))
-    }
+    }*/
 
     gettimeofday(&start_time, NULL);
     std::string text = "";
     int total_segments = pcmf32.size(); // Nombre total de segments
     __android_log_print(ANDROID_LOG_INFO, "Whisper ASR", "Le nombre de segments est : %d", total_segments);
+
+    int input = g_whisper_tflite_params.interpreter->inputs()[0];
+    TfLiteTensor* input_tensor = g_whisper_tflite_params.interpreter->tensor(input);
+    TfLiteIntArray* dims = input_tensor->dims;
+    int tensor_size = 1;
+    for (int i = 0; i < dims->size; ++i) {
+        __android_log_print(ANDROID_LOG_INFO, "Whisper ASR", "Dimension %d: %d", i, dims->data[i]);
+    }
+
     for (size_t i = 0; i < segments.size(); ++i) {
         const auto processor_count = std::thread::hardware_concurrency();
         auto& segment = segments[i];  // Obtenir le segment courant
@@ -672,10 +673,10 @@ Java_com_example_audio2text_MainActivity_loadModelJNI(
 
         // Copier un segment de données dans le tensor d'entrée
         if (INFERENCE_ON_AUDIO_FILE) {
-            __android_log_print(ANDROID_LOG_INFO, "Whisper ASR", "Essai de copie dans le buffer: %d", mel.data.data() + i);
+            __android_log_print(ANDROID_LOG_INFO, "Whisper ASR", "Essai de copie dans le buffer: %d", mel.data.data());
             __android_log_print(ANDROID_LOG_INFO, "Whisper ASR", "Taille de mel data: %d", mel.data.size());
 
-            memcpy(g_whisper_tflite_params.input, mel.data.data(), mel.n_mel * mel.n_len * sizeof(float));
+            memcpy(g_whisper_tflite_params.input, mel.data.data(), WHISPER_N_MEL * WHISPER_MEL_LEN * sizeof(float));
             __android_log_print(ANDROID_LOG_INFO, "Whisper ASR", "Copie réussie");
         } else {
             // Remarque: cette partie du code pourrait nécessiter une modification similaire
@@ -684,34 +685,6 @@ Java_com_example_audio2text_MainActivity_loadModelJNI(
 
         // Exécuter l'inférence
         if (g_whisper_tflite_params.interpreter->Invoke() != kTfLiteOk) return result;
-
-        __android_log_print(ANDROID_LOG_VERBOSE, "Whisper ASR", "JNI Inference time %ld seconds \n",(end_time.tv_sec-start_time.tv_sec));
-        //int output = g_whisper_tflite_params.interpreter->outputs()[0];
-        //TfLiteTensor *output_tensor = g_whisper_tflite_params.interpreter->tensor(output);
-        float *outputTensorFirst = g_whisper_tflite_decoder_params.interpreter->typed_output_tensor<float>(0);
-        memcpy(g_whisper_tflite_decoder_params.input, outputTensorFirst, sizeof(outputTensorFirst));
-        g_whisper_tflite_decoder_params.input2 = g_whisper_tflite_decoder_params.interpreter->typed_input_tensor<float>(1);
-        std::vector<float> decode_input_ids = { 50258, 50259, 50359 };
-        memcpy(g_whisper_tflite_decoder_params.input2, decode_input_ids.data(), 3*sizeof(float));
-        std::vector<int> finalTokens;
-        finalTokens.insert(finalTokens.begin(), 50258);
-        finalTokens.insert(finalTokens.begin(), 50259);
-        finalTokens.insert(finalTokens.begin(), 50359);
-
-        /*while(true) {
-          if (g_whisper_tflite_decoder_params.interpreter->Invoke() != kTfLiteOk) return result;
-            TfLiteTensor *output_int = g_whisper_tflite_params.interpreter->tensor(0);
-            int total_size = 1;
-            for (int i = 0; i < output_int->dims->size; ++i) {
-                total_size *= output_int->dims->data[i];
-            }
-            int *last_token = std::max_element(output_int->data.i32, output_int->data.i32 + total_size);
-            finalTokens.insert(finalTokens.end(), *last_token);
-            if( *last_token == 50257 ) {
-              break;
-            }
-            memcpy(g_whisper_tflite_decoder_params.input2, last_token, sizeof(int));
-        }*/
 
             // Traiter le résultat
             int output = g_whisper_tflite_params.interpreter->outputs()[0];

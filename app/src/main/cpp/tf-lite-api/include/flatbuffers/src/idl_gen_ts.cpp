@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#include "idl_gen_ts.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -23,6 +25,7 @@
 
 #include "flatbuffers/code_generators.h"
 #include "flatbuffers/flatbuffers.h"
+#include "flatbuffers/flatc.h"
 #include "flatbuffers/idl.h"
 #include "flatbuffers/util.h"
 #include "idl_namer.h"
@@ -252,7 +255,6 @@ class TsGenerator : public BaseGenerator {
 
     for (const auto &it : ns_defs_) {
       code = "// " + std::string(FlatBuffersGeneratedWarning()) + "\n\n";
-
       // export all definitions in ns entry point module
       int export_counter = 0;
       for (const auto &def : it.second.definitions) {
@@ -278,7 +280,14 @@ class TsGenerator : public BaseGenerator {
         base_name_rel += base_file_name;
         auto ts_file_path_rel = base_name_rel + ".ts";
         auto type_name = def.first;
-        code += "export { " + type_name + " } from '";
+        auto fully_qualified_type_name =
+            it.second.ns->GetFullyQualifiedName(type_name);
+        auto is_struct = parser_.structs_.Lookup(fully_qualified_type_name);
+        code += "export { " + type_name;
+        if (parser_.opts.generate_object_based_api && is_struct) {
+          code += ", " + type_name + parser_.opts.object_suffix;
+        }
+        code += " } from '";
         std::string import_extension =
             parser_.opts.ts_no_import_ext ? "" : ".js";
         code += base_name_rel + import_extension + "';\n";
@@ -465,14 +474,13 @@ class TsGenerator : public BaseGenerator {
           return "BigInt('" + value.constant + "')";
         }
         default: {
-          if (auto val = value.type.enum_def->FindByValue(value.constant)) {
-            return AddImport(imports, *value.type.enum_def,
-                             *value.type.enum_def)
-                       .name +
-                   "." + namer_.Variant(*val);
-          } else {
-            return value.constant;
-          }
+          EnumVal *val = value.type.enum_def->FindByValue(value.constant);
+          if (val == nullptr)
+            val = const_cast<EnumVal *>(value.type.enum_def->MinValue());
+          return AddImport(imports, *value.type.enum_def,
+                            *value.type.enum_def)
+                      .name +
+                  "." + namer_.Variant(*val);
         }
       }
     }
@@ -2172,6 +2180,56 @@ std::string TSMakeRule(const Parser &parser, const std::string &path,
     make_rule += " " + *it;
   }
   return make_rule;
+}
+
+namespace {
+
+class TsCodeGenerator : public CodeGenerator {
+ public:
+  Status GenerateCode(const Parser &parser, const std::string &path,
+                      const std::string &filename) override {
+    if (!GenerateTS(parser, path, filename)) { return Status::ERROR; }
+    return Status::OK;
+  }
+
+  Status GenerateCode(const uint8_t *buffer, int64_t length) override {
+    (void)buffer;
+    (void)length;
+    return Status::NOT_IMPLEMENTED;
+  }
+
+  Status GenerateMakeRule(const Parser &parser, const std::string &path,
+                          const std::string &filename,
+                          std::string &output) override {
+    output = TSMakeRule(parser, path, filename);
+    return Status::OK;
+  }
+
+  Status GenerateGrpcCode(const Parser &parser, const std::string &path,
+                          const std::string &filename) override {
+    if (!GenerateTSGRPC(parser, path, filename)) { return Status::ERROR; }
+    return Status::OK;
+  }
+
+  Status GenerateRootFile(const Parser &parser,
+                          const std::string &path) override {
+    (void)parser;
+    (void)path;
+    return Status::NOT_IMPLEMENTED;
+  }
+  bool IsSchemaOnly() const override { return true; }
+
+  bool SupportsBfbsGeneration() const override { return false; }
+  bool SupportsRootFileGeneration() const override { return false; }
+
+  IDLOptions::Language Language() const override { return IDLOptions::kTs; }
+
+  std::string LanguageName() const override { return "TS"; }
+};
+}  // namespace
+
+std::unique_ptr<CodeGenerator> NewTsCodeGenerator() {
+  return std::unique_ptr<TsCodeGenerator>(new TsCodeGenerator());
 }
 
 }  // namespace flatbuffers

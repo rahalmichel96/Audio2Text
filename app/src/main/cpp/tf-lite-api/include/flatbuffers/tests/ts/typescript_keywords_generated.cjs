@@ -50,15 +50,24 @@ __export(reflection_exports, {
   AdvancedFeatures: () => AdvancedFeatures,
   BaseType: () => BaseType,
   Enum: () => Enum,
+  EnumT: () => EnumT,
   EnumVal: () => EnumVal,
+  EnumValT: () => EnumValT,
   Field: () => Field,
+  FieldT: () => FieldT,
   KeyValue: () => KeyValue,
+  KeyValueT: () => KeyValueT,
   Object_: () => Object_,
   RPCCall: () => RPCCall,
+  RPCCallT: () => RPCCallT,
   Schema: () => Schema,
   SchemaFile: () => SchemaFile,
+  SchemaFileT: () => SchemaFileT,
+  SchemaT: () => SchemaT,
   Service: () => Service,
-  Type: () => Type
+  ServiceT: () => ServiceT,
+  Type: () => Type,
+  TypeT: () => TypeT
 });
 
 // reflection/advanced-features.js

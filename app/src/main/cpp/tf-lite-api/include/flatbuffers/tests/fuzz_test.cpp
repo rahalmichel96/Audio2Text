@@ -234,7 +234,7 @@ void FuzzTest2() {
           break;
         default:
           // All the scalar types.
-          schema += flatbuffers::kTypeNames[base_type];
+          schema += flatbuffers::TypeName(base_type);
 
           if (!deprecated) {
             // We want each instance to use its own random value.
@@ -275,7 +275,7 @@ void FuzzTest2() {
   parser.opts.indent_step = 0;
   auto result =
       GenerateText(parser, parser.builder_.GetBufferPointer(), &jsongen);
-  TEST_EQ(result, true);
+  TEST_NULL(result);
 
   if (jsongen != json) {
     // These strings are larger than a megabyte, so we show the bytes around

@@ -16,6 +16,8 @@
 
 // independent from idl_parser, since this code is not needed for most clients
 
+#include "idl_gen_kotlin.h"
+
 #include <functional>
 #include <unordered_set>
 
@@ -53,7 +55,7 @@ static Namer::Config KotlinDefaultConfig() {
            /*functions=*/Case::kKeep,
            /*fields=*/Case::kLowerCamel,
            /*variables=*/Case::kLowerCamel,
-           /*variants=*/Case::kLowerCamel,
+           /*variants=*/Case::kKeep,
            /*enum_variant_seperator=*/"",  // I.e. Concatenate.
            /*escape_keywords=*/Namer::Config::Escape::BeforeConvertingCase,
            /*namespaces=*/Case::kKeep,
@@ -287,7 +289,6 @@ class KotlinGenerator : public BaseGenerator {
     GenerateComment(enum_def.doc_comment, writer, &comment_config);
 
     writer += "@Suppress(\"unused\")";
-    writer += "@kotlin.ExperimentalUnsignedTypes";
     writer += "class " + namer_.Type(enum_def) + " private constructor() {";
     writer.IncrementIdentLevel();
 
@@ -299,7 +300,7 @@ class KotlinGenerator : public BaseGenerator {
         auto field_type = GenTypeBasic(enum_def.underlying_type.base_type);
         auto val = enum_def.ToString(ev);
         auto suffix = LiteralSuffix(enum_def.underlying_type.base_type);
-        writer.SetValue("name", namer_.LegacyKotlinVariant(ev));
+        writer.SetValue("name", namer_.Variant(ev.name));
         writer.SetValue("type", field_type);
         writer.SetValue("val", val + suffix);
         GenerateComment(ev.doc_comment, writer, &comment_config);
@@ -493,7 +494,6 @@ class KotlinGenerator : public BaseGenerator {
     writer.SetValue("superclass", fixed ? "Struct" : "Table");
 
     writer += "@Suppress(\"unused\")";
-    writer += "@kotlin.ExperimentalUnsignedTypes";
     writer += "class {{struct_name}} : {{superclass}}() {\n";
 
     writer.IncrementIdentLevel();
@@ -524,7 +524,7 @@ class KotlinGenerator : public BaseGenerator {
           // runtime.
           GenerateFunOneLine(
               writer, "validateVersion", "", "",
-              [&]() { writer += "Constants.FLATBUFFERS_23_1_21()"; },
+              [&]() { writer += "Constants.FLATBUFFERS_23_5_8()"; },
               options.gen_jvmstatic);
 
           GenerateGetRootAsAccessors(namer_.Type(struct_def), writer, options);
@@ -701,6 +701,9 @@ class KotlinGenerator : public BaseGenerator {
     writer.SetValue("root", GenMethod(vector_type));
     writer.SetValue("cast", CastToSigned(vector_type));
 
+    if (IsUnsigned(vector_type.base_type)) {
+      writer += "@kotlin.ExperimentalUnsignedTypes";
+    }
     GenerateFun(
         writer, method_name, params, "Int",
         [&]() {
@@ -1595,4 +1598,61 @@ bool GenerateKotlin(const Parser &parser, const std::string &path,
   kotlin::KotlinGenerator generator(parser, path, file_name);
   return generator.generate();
 }
+
+namespace {
+
+class KotlinCodeGenerator : public CodeGenerator {
+ public:
+  Status GenerateCode(const Parser &parser, const std::string &path,
+                      const std::string &filename) override {
+    if (!GenerateKotlin(parser, path, filename)) { return Status::ERROR; }
+    return Status::OK;
+  }
+
+  Status GenerateCode(const uint8_t *buffer, int64_t length) override {
+    (void)buffer;
+    (void)length;
+    return Status::NOT_IMPLEMENTED;
+  }
+
+  Status GenerateMakeRule(const Parser &parser, const std::string &path,
+                          const std::string &filename,
+                          std::string &output) override {
+    (void)parser;
+    (void)path;
+    (void)filename;
+    (void)output;
+    return Status::NOT_IMPLEMENTED;
+  }
+
+  Status GenerateGrpcCode(const Parser &parser, const std::string &path,
+                          const std::string &filename) override {
+    (void)parser;
+    (void)path;
+    (void)filename;
+    return Status::NOT_IMPLEMENTED;
+  }
+
+  Status GenerateRootFile(const Parser &parser,
+                          const std::string &path) override {
+    (void)parser;
+    (void)path;
+    return Status::NOT_IMPLEMENTED;
+  }
+  bool IsSchemaOnly() const override { return true; }
+
+  bool SupportsBfbsGeneration() const override { return false; }
+
+  bool SupportsRootFileGeneration() const override { return false; }
+
+  IDLOptions::Language Language() const override { return IDLOptions::kKotlin; }
+
+  std::string LanguageName() const override { return "Kotlin"; }
+};
+}  // namespace
+
+std::unique_ptr<CodeGenerator> NewKotlinCodeGenerator() {
+  return std::unique_ptr<KotlinCodeGenerator>(new KotlinCodeGenerator());
+}
+
 }  // namespace flatbuffers
