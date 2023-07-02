@@ -10,7 +10,7 @@ project("audio2text")
 
 # Specify where to find the header files for TF Lite C++
 set( INCLUDE_DIRS
-        ${CMAKE_CURRENT_LIST_DIR}/tf-lite-api/tensorflow_src/tensorflow
+        ${CMAKE_CURRENT_LIST_DIR}/tf-lite-api/tensorflow_src
         ${CMAKE_CURRENT_LIST_DIR}/tf-lite-api/include
         ${CMAKE_CURRENT_LIST_DIR}/ffmpeg-api)
 include_directories(${INCLUDE_DIRS})

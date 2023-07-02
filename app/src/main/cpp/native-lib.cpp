@@ -28,6 +28,8 @@ extern "C" {
 #include "tensorflow/lite/delegates/gpu/delegate.h"
 #include <fstream>
 #include <memory>
+#include <vector>
+#include <functional>
 
 #define INFERENCE_ON_AUDIO_FILE 1
 
@@ -85,6 +87,21 @@ struct audio_buffer {
     uint8_t *ptr;
     int size; /* size left in the buffer */
 };
+
+// Définir la structure pour les paramètres
+struct Params {
+    std::vector<std::vector<float>> segments;
+    std::function<void(const std::string&)> callback;
+};
+
+// Variable globale pour l'environnement Java
+JavaVM* g_JavaVM = nullptr;
+jobject g_Callback = nullptr;
+
+extern "C" JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
+    g_JavaVM = vm;
+    return JNI_VERSION_1_6;  // la version de JNI que votre code supporte
+}
 
 static void write_wave_hdr(int fd, size_t size)
 {
@@ -257,7 +274,7 @@ static void convert_frame(struct SwrContext *swr, AVCodecContext *codec,
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_example_audio2text_MainActivity_freeModelJNI(
+Java_com_example_audio2text_MyApplication_freeModelJNI(
         JNIEnv* env,
         jobject /* this */) {
     if(g_whisper_tflite_params.buffer){
@@ -267,10 +284,11 @@ Java_com_example_audio2text_MainActivity_freeModelJNI(
         free(g_whisper_tflite_params.buffer);
 
     }
+    env->DeleteGlobalRef(g_Callback);
     return 0;
 }
 
-extern "C" JNIEXPORT jint JNICALL Java_com_example_audio2text_MainActivity_convertTo16kHz(JNIEnv* env, jobject thiz, jstring inputFilePath, jstring outputFilePath) {
+extern "C" JNIEXPORT jint JNICALL Java_com_example_audio2text_MyApplication_convertTo16kHz(JNIEnv* env, jobject thiz, jstring inputFilePath, jstring outputFilePath) {
     const char* inputPath = env->GetStringUTFChars(inputFilePath, nullptr);
     const char* outputPath = env->GetStringUTFChars(outputFilePath, nullptr);
 
@@ -393,23 +411,90 @@ extern "C" JNIEXPORT jint JNICALL Java_com_example_audio2text_MainActivity_conve
     return 0;
 }
 
+std::string runTranscription(std::vector<std::vector<float>>& segments, size_t segment_size, std::function<void(int)> callback) {
+    std::string text = "";
+    for (size_t i = 0; i < segments.size(); ++i) {
+        const auto processor_count = std::thread::hardware_concurrency();
+        auto& segment = segments[i];  // Obtenir le segment courant
+        __android_log_print(ANDROID_LOG_INFO, "Whisper ASR", "Taille de segment: %d", segment.size());
+
+        __android_log_print(ANDROID_LOG_INFO, "Whisper ASR", "Stade: %d", i);
+        // Calculez la taille de la tranche actuelle. Si nous sommes à la fin des données, elle pourrait être plus petite que `chunk_size`.
+        int current_chunk_size = std::min(segment_size, segment.size());
+        if (current_chunk_size < segment_size) {
+            __android_log_print(ANDROID_LOG_INFO, "Whisper ASR", "On y est");
+            // Si la tranche est plus petite que `chunk_size`, ajoutez des zéros pour l'aligner à `chunk_size`.
+            segment.insert(segment.end(), WHISPER_SAMPLE_RATE*WHISPER_CHUNK_SIZE - segment.size(), 0);
+        }
+
+        // Remplacer pcmf32.data() par segment.data() pour log_mel_spectrogram
+        if (!log_mel_spectrogram(segment.data(), segment.size(), WHISPER_SAMPLE_RATE, WHISPER_N_FFT, WHISPER_HOP_LENGTH, WHISPER_N_MEL, processor_count,filters, mel)) {
+            fprintf(stderr, "%s: failed to compute mel spectrogram\n", __func__);
+            //return result;
+        }
+
+        // Copier un segment de données dans le tensor d'entrée
+        if (INFERENCE_ON_AUDIO_FILE) {
+            __android_log_print(ANDROID_LOG_INFO, "Whisper ASR", "Essai de copie dans le buffer: %d", mel.data.data());
+            __android_log_print(ANDROID_LOG_INFO, "Whisper ASR", "Taille de mel data: %d", mel.data.size());
+
+            memcpy(g_whisper_tflite_params.input, mel.data.data(), WHISPER_N_MEL * WHISPER_MEL_LEN * sizeof(float));
+            __android_log_print(ANDROID_LOG_INFO, "Whisper ASR", "Copie réussie");
+        } else {
+            // Remarque: cette partie du code pourrait nécessiter une modification similaire
+            memcpy(g_whisper_tflite_params.input, _content_input_features_bin, WHISPER_N_MEL*WHISPER_MEL_LEN*sizeof(float));
+        }
+
+        // Exécuter l'inférence
+        if (g_whisper_tflite_params.interpreter->Invoke() != kTfLiteOk) fprintf(stderr, "%s: failed to execute inference\n", __func__);;
+
+        // Traiter le résultat
+        int output = g_whisper_tflite_params.interpreter->outputs()[0];
+        TfLiteTensor *output_tensor = g_whisper_tflite_params.interpreter->tensor(output);
+        TfLiteIntArray *output_dims = output_tensor->dims;
+        auto output_size = output_dims->data[output_dims->size - 1];
+        int *output_int = g_whisper_tflite_params.interpreter->typed_output_tensor<int>(0);
+
+        for (int j = 0; j < output_size; j++) {
+            if(output_int[j] == g_vocab.token_eot){
+                break;
+            }
+            if((output_int[j] !=50257) && (output_int[j] !=50362) && (output_int[j] !=50265) && (output_int[j] !=50258) && (output_int[j] !=50359))
+                text += whisper_token_to_str(output_int[j]);
+        }
+        // Calculate progress percentage
+        int progress = static_cast<int>((static_cast<double>(i + 1) / segments.size()) * 100);
+        __android_log_print(ANDROID_LOG_VERBOSE, "Progression", "\n%d\n", segment_size);
+        __android_log_print(ANDROID_LOG_VERBOSE, "Whisper ASR: part transcript", "\n%s\n", text.c_str());
+        // Après chaque itération, appelez la fonction de rappel pour envoyer la transcription partielle
+        callback(progress);
+        __android_log_print(ANDROID_LOG_VERBOSE, "Whisper ASR: part transcript", "Callback réussi\n");
+    }
+
+    return text;
+}
+
 // Example: load a tflite model using TF Lite C++ API
 // Credit to https://github.com/ValYouW/crossplatform-tflite-object-detecion
 // Credit to https://github.com/cuongvng/TF-Lite-Cpp-API-for-Android
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_example_audio2text_MainActivity_loadModelJNI(
+Java_com_example_audio2text_MyApplication_loadModelJNI(
         JNIEnv* env,
         jobject /* this */,
         jobject assetManager,
-        jstring fileName) {
+        jstring fileName,
+        jobject callback) {
+
+    // Get the ProgressCallback class and its onProgress method
+    jclass CallbackClass = env->GetObjectClass(callback);
+    jmethodID CallbackMethod = env->GetMethodID(CallbackClass, "onProgressUpdate", "(I)V");
 
     //Load Whisper Model into buffer
     jstring result = NULL;
     struct timeval start_time,end_time;
     if(!g_whisper_tflite_params.is_whisper_tflite_initialized) {
         gettimeofday(&start_time, NULL);
-        //const char *modelpathEncoder = "whisper-encoder-hybrid.tflite";
-        //const char *modelpathDecoder = "whisper-decoder-language-hybrid.tflite";
+
         const char *modelpath = "whisper-small.tflite";
         if (!(env->IsSameObject(assetManager, NULL))) {
             AAssetManager *mgr = AAssetManager_fromJava(env, assetManager);
@@ -420,14 +505,6 @@ Java_com_example_audio2text_MainActivity_loadModelJNI(
             g_whisper_tflite_params.buffer = (char *) malloc(sizeof(char) * g_whisper_tflite_params.size);
             AAsset_read(asset, g_whisper_tflite_params.buffer, g_whisper_tflite_params.size);
             AAsset_close(asset);
-
-            /*AAsset *assetDecoder = AAssetManager_open(mgr, modelpathDecoder, AASSET_MODE_UNKNOWN);
-            assert(assetDecoder != nullptr);
-
-            g_whisper_tflite_decoder_params.size = AAsset_getLength(assetDecoder);
-            g_whisper_tflite_decoder_params.buffer = (char *) malloc(sizeof(char) * g_whisper_tflite_decoder_params.size);
-            AAsset_read(assetDecoder, g_whisper_tflite_decoder_params.buffer, g_whisper_tflite_decoder_params.size);
-            AAsset_close(assetDecoder);*/
         }
 
         //Load filters and vocab data from preg enerated filters_vocab_gen.bin file
@@ -582,6 +659,8 @@ Java_com_example_audio2text_MainActivity_loadModelJNI(
             double duration_in_seconds = (double)n / wav.sampleRate;
             __android_log_print(ANDROID_LOG_VERBOSE, "Whisper ASR:", "Audio duration: %f seconds", duration_in_seconds);
         }
+
+        env->ReleaseStringUTFChars(fileName, pcmfilename);
     }//end of audio file processing
 
     for (size_t i = 0; i < pcmf32.size(); i += segment_size) {
@@ -598,6 +677,7 @@ Java_com_example_audio2text_MainActivity_loadModelJNI(
     __android_log_print(ANDROID_LOG_VERBOSE, "Whisper ASR", "JNI (Spectrogram)input feature extraction time %ld seconds \n",(end_time.tv_sec-start_time.tv_sec));
 
     if(!g_whisper_tflite_params.is_whisper_tflite_initialized) {
+        __android_log_print(ANDROID_LOG_INFO, "MyApp", "On y est!!!!!!!!!!!");
         // Load tflite model buffer
         g_whisper_tflite_params.model =
                 tflite::FlatBufferModel::BuildFromBuffer(g_whisper_tflite_params.buffer, g_whisper_tflite_params.size);
@@ -621,22 +701,15 @@ Java_com_example_audio2text_MainActivity_loadModelJNI(
         g_whisper_tflite_params.input = g_whisper_tflite_params.interpreter->typed_input_tensor<float>(0);
         g_whisper_tflite_params.is_whisper_tflite_initialized = true;
     }
-    /*if(!g_whisper_tflite_decoder_params.is_whisper_tflite_initialized) {
-        g_whisper_tflite_decoder_params.model =
-                tflite::FlatBufferModel::BuildFromBuffer(g_whisper_tflite_decoder_params.buffer, g_whisper_tflite_decoder_params.size);
-        TFLITE_MINIMAL_CHECK(g_whisper_tflite_decoder_params.model != nullptr);
 
-        tflite::InterpreterBuilder builderDecoder(*(g_whisper_tflite_decoder_params.model), g_whisper_tflite_decoder_params.resolver);
-        builderDecoder(&(g_whisper_tflite_decoder_params.interpreter));
-
-        TFLITE_MINIMAL_CHECK(g_whisper_tflite_decoder_params.interpreter != nullptr);
-        TFLITE_MINIMAL_CHECK(g_whisper_tflite_decoder_params.interpreter->AllocateTensors() == kTfLiteOk);
-        g_whisper_tflite_decoder_params.input = g_whisper_tflite_decoder_params.interpreter->typed_input_tensor<float>(0);
-        //memcpy(g_whisper_tflite_decoder_params.inputOriginal, g_whisper_tflite_params.input, sizeof(g_whisper_tflite_decoder_params.input))
-        g_whisper_tflite_decoder_params.is_whisper_tflite_initialized = true;
+    if (g_whisper_tflite_params.interpreter) {
+        int input = g_whisper_tflite_params.interpreter->inputs()[0];
+        TfLiteTensor* tensor = g_whisper_tflite_params.interpreter->tensor(input);
+        size_t tensor_size = tensor->bytes;
+        __android_log_print(ANDROID_LOG_INFO, "MyApp", "Size of input tensor: %zu bytes", tensor_size);
     } else {
-        //memcpy(g_whisper_tflite_decoder_params.input, g_whisper_tflite_decoder_params.inputOriginal, sizeof(g_whisper_tflite_decoder_params.inputOriginal))
-    }*/
+        __android_log_print(ANDROID_LOG_ERROR, "MyApp", "Failed to initialize interpreter");
+    }
 
     gettimeofday(&start_time, NULL);
     std::string text = "";
@@ -651,61 +724,12 @@ Java_com_example_audio2text_MainActivity_loadModelJNI(
         __android_log_print(ANDROID_LOG_INFO, "Whisper ASR", "Dimension %d: %d", i, dims->data[i]);
     }
 
-    for (size_t i = 0; i < segments.size(); ++i) {
-        const auto processor_count = std::thread::hardware_concurrency();
-        auto& segment = segments[i];  // Obtenir le segment courant
-        __android_log_print(ANDROID_LOG_INFO, "Whisper ASR", "Taille de segment: %d", segment.size());
+    std::string transcription = runTranscription(segments, segment_size, [env, callback, CallbackMethod](int progress) {
+            env->CallVoidMethod(callback, CallbackMethod, progress);
+            __android_log_print(ANDROID_LOG_INFO, "MyApp", "Progress: %d", progress);
+    });
 
-        __android_log_print(ANDROID_LOG_INFO, "Whisper ASR", "Stade: %d", i);
-        // Calculez la taille de la tranche actuelle. Si nous sommes à la fin des données, elle pourrait être plus petite que `chunk_size`.
-        int current_chunk_size = std::min(segment_size, segment.size());
-        if (current_chunk_size < segment_size) {
-            __android_log_print(ANDROID_LOG_INFO, "Whisper ASR", "On y est");
-            // Si la tranche est plus petite que `chunk_size`, ajoutez des zéros pour l'aligner à `chunk_size`.
-            segment.insert(segment.end(), WHISPER_SAMPLE_RATE*WHISPER_CHUNK_SIZE - segment.size(), 0);
-        }
-
-        // Remplacer pcmf32.data() par segment.data() pour log_mel_spectrogram
-        if (!log_mel_spectrogram(segment.data(), segment.size(), WHISPER_SAMPLE_RATE, WHISPER_N_FFT, WHISPER_HOP_LENGTH, WHISPER_N_MEL, processor_count,filters, mel)) {
-            fprintf(stderr, "%s: failed to compute mel spectrogram\n", __func__);
-            return result;
-        }
-
-        // Copier un segment de données dans le tensor d'entrée
-        if (INFERENCE_ON_AUDIO_FILE) {
-            __android_log_print(ANDROID_LOG_INFO, "Whisper ASR", "Essai de copie dans le buffer: %d", mel.data.data());
-            __android_log_print(ANDROID_LOG_INFO, "Whisper ASR", "Taille de mel data: %d", mel.data.size());
-
-            memcpy(g_whisper_tflite_params.input, mel.data.data(), WHISPER_N_MEL * WHISPER_MEL_LEN * sizeof(float));
-            __android_log_print(ANDROID_LOG_INFO, "Whisper ASR", "Copie réussie");
-        } else {
-            // Remarque: cette partie du code pourrait nécessiter une modification similaire
-            memcpy(g_whisper_tflite_params.input, _content_input_features_bin, WHISPER_N_MEL*WHISPER_MEL_LEN*sizeof(float));
-        }
-
-        // Exécuter l'inférence
-        if (g_whisper_tflite_params.interpreter->Invoke() != kTfLiteOk) return result;
-
-            // Traiter le résultat
-            int output = g_whisper_tflite_params.interpreter->outputs()[0];
-            TfLiteTensor *output_tensor = g_whisper_tflite_params.interpreter->tensor(output);
-            TfLiteIntArray *output_dims = output_tensor->dims;
-            auto output_size = output_dims->data[output_dims->size - 1];
-            int *output_int = g_whisper_tflite_params.interpreter->typed_output_tensor<int>(0);
-
-            for (int j = 0; j < output_size; j++) {
-                if(output_int[j] == g_vocab.token_eot){
-                    break;
-                }
-                if((output_int[j] !=50257) && (output_int[j] !=50362))
-                    text += whisper_token_to_str(output_int[j]);
-            }
-
-            __android_log_print(ANDROID_LOG_VERBOSE, "Whisper ASR: part transcript", "\n%s\n", text.c_str());
-        }
-        __android_log_print(ANDROID_LOG_VERBOSE, "Whisper ASR", "\n%s\n", text.c_str());
-        printf("\n");
-        //std::string status = "Load TF Lite model successfully!";
+    //std::string status = "Load TF Lite model successfully!";
         //free(buffer);
-        return env->NewStringUTF(text.c_str());
+    return env->NewStringUTF(transcription.c_str());
     }

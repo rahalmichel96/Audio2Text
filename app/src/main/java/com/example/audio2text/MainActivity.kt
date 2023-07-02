@@ -1,39 +1,52 @@
 package com.example.audio2text
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
-import android.content.res.AssetManager
 import android.net.Uri
 import android.os.Bundle
-import android.os.Environment
 import android.provider.DocumentsContract
 import android.provider.MediaStore
+import android.text.method.ScrollingMovementMethod
 import android.util.Log
+import android.view.View
 import android.widget.Button
+import android.widget.EditText
+import android.widget.ProgressBar
+import android.widget.TextView
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-
+import androidx.work.Data
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import java.io.File
 
 
 class MainActivity : AppCompatActivity() {
     private lateinit var selectAudioFileLauncher: ActivityResultLauncher<Intent>
     private val bufferSize = 1024 * 4
+    private lateinit var myProgressBar: ProgressBar
+    private lateinit var transcriptionText: TextView
+    private lateinit var header: TextView
+    private lateinit var selectFileButton: Button
+    val CHANNEL_ID = "com.example.audio2text.TRANSCRIPTION_CHANNEL"
 
-    companion object {
-        init {
-            System.loadLibrary("native-lib");
-        }
+    // Définir l'interface pour le callback
+    interface ProgressCallback {
+        fun onProgress(progress: Int)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         val outputDir = applicationContext.filesDir
-
-
+        myProgressBar = findViewById(R.id.loader)
+        transcriptionText = findViewById(R.id.resultTextView)
+        header = findViewById(R.id.header)
         // Set up the ActivityResultLauncher
         selectAudioFileLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK && result.data != null) {
@@ -52,13 +65,42 @@ class MainActivity : AppCompatActivity() {
                     // Construct a new file in the private files directory.
                     val outputFile: File = File(outputDir, "$fileNameWithoutExtension.wav")
                     Log.d("MainActivity", "Loading audio file and convert to 16kHz wav")
-                    val returnCode = convertTo16kHz(inputFilePath, outputFile.absolutePath)
+                    val returnCode = (applicationContext as MyApplication).convertTo16kHz(inputFilePath, outputFile.absolutePath)
                     Log.d("MainActivity", "Conversion finished")
                     if (returnCode == 0) {
-                        Log.d("File path", outputFile.absolutePath)
-                        // Conversion réussie
-                        val transcript: String? = loadModelJNI(assets,outputFile.absolutePath)
-                        Log.d("Transcript", transcript.toString())
+                        val data = Data.Builder()
+                            .putString("audioFilePath", outputFile.absolutePath)
+                            .build()
+
+                        val workRequest = OneTimeWorkRequestBuilder<TranscriptionWorker>()
+                            .setInputData(data)
+                            .build()
+
+                        WorkManager.getInstance(this)
+                            .getWorkInfoByIdLiveData(workRequest.id)
+                            .observe(this) { workInfo ->
+                                if (workInfo != null && workInfo.state == WorkInfo.State.RUNNING) {
+                                    transcriptionText.visibility = View.GONE
+                                    myProgressBar.visibility = View.VISIBLE
+                                    val progress = workInfo.progress.getInt("Progress", 0)
+                                    Log.d("TranscriptionWorker", "Progress: $progress")
+                                    header.visibility = View.GONE
+                                    selectFileButton.visibility = View.GONE
+                                    myProgressBar.progress = progress
+                                } else if (workInfo != null && workInfo.state == WorkInfo.State.SUCCEEDED) {
+                                    myProgressBar.visibility = View.GONE
+                                    selectFileButton.visibility = View.VISIBLE
+                                    val transcriptionResult = workInfo.outputData.getString("transcription")
+                                    Log.d("Final result", transcriptionResult!!)
+                                    transcriptionText.apply {
+                                        text = transcriptionResult
+                                        visibility = View.VISIBLE
+                                        movementMethod = ScrollingMovementMethod()
+                                    }
+                                }
+                            }
+
+                        WorkManager.getInstance(this).enqueue(workRequest)
                     } else {
                         Log.d("Erreur de conversion", "Erreur de conversion")
                     }
@@ -69,7 +111,7 @@ class MainActivity : AppCompatActivity() {
 
         Log.d("MainActivity", "Click on button")
         // Add a click listener to the select file button
-        val selectFileButton: Button = findViewById(R.id.select_file_button)
+        selectFileButton = findViewById(R.id.select_file_button)
         selectFileButton.setOnClickListener {
             // Prompt the user to select an audio file
             val intent = Intent(Intent.ACTION_PICK, MediaStore.Audio.Media.EXTERNAL_CONTENT_URI)
@@ -77,22 +119,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private external fun convertTo16kHz(inputFilePath: String?, outputFilePath: String?): Int
-
-    /**
-     * A native method that is implemented by the 'native-lib' native library,
-     * which is packaged with this application.
-     */
-    // Load model by TF Lite C++ API
-    private external fun loadModelJNI(
-        assetManager: AssetManager,
-        fileName: String
-    ): String?
-
-    private external fun freeModelJNI(): Int
     override fun onDestroy() {
         super.onDestroy()
-        freeModelJNI()
+        (applicationContext as MyApplication).freeModelJNI()
     }
 
     fun getPathFromUri(context: Context, uri: Uri): String? {

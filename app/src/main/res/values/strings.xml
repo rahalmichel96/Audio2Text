@@ -1,8 +1,7 @@
 <resources>
-    <string name="app_name">Whisper</string>
-    <string name="app_name_layout">Whisper ASR</string>
-    <string name="record_complete">Record for 30Seconds Completed</string>
-    <string name="record_limit">Press the mic button to start recording for 30Seconds and stop when its done.</string>
-    <string name="select_file">Select File</string>
-    <string name="select_text">Sélectionnez un fichier audio</string>
+    <string name="channel_name">Niveau de progression</string>
+    <string name="channel_description">Niveau de progression de la transcription audio</string>
+    <string name="charger_audio">Charger audio</string>
+    <string name="app_name">Audio2text</string>
+    <string name="description">Dans cette application, vous pouvez convertir un audio en texte. Il vous suffit pour cela de sélectionner un fichier à partir du bouton en bas de l\'écran.</string>
 </resources>
